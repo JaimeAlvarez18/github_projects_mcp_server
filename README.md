@@ -28,7 +28,7 @@ Here's an example configuration using `uvx` as the command runner:
     "github-projects": {
       "command": "uvx",
       "args": [
-        "mcp-github-projects"
+        "github_projects_mcp_server"
       ],
       "env": {
         "GITHUB_TOKEN": "your_pat_here"
@@ -50,7 +50,7 @@ To run the project directly from source code, follow these steps:
 1. Clone the repository:
 
    ```
-   git clone git@github.com:Arclio/github-projects-mcp.git
+   git clone [git@github.com:JaimeAlvarez18/github_projects_mcp_server]
    cd github-projects-mcp
    ```
 
@@ -98,7 +98,7 @@ To run the project directly from source code, follow these steps:
           "--directory",
           "/path/to/github-projects-mcp",
           "run",
-          "mcp-github-projects"
+          "github_projects_mcp_server"
         ],
         "env": {
           "GITHUB_TOKEN": "your_pat_here"
@@ -108,7 +108,7 @@ To run the project directly from source code, follow these steps:
   }
   ```
 
-  Make sure to replace `/path/to/github-projects-mcp` and `your_pat_here` with
+  Make sure to replace `/path/to/github_projects_mcp_server` and `your_pat_here` with
   your actual repository path and GitHub Personal Access Token.
 
 ## Available Tools
@@ -138,3 +138,4 @@ To contribute, make sure to:
 1. Add proper error handling for all GraphQL operations
 2. Add type annotations for all functions and parameters
 3. Update documentation when adding new tools or features
+
