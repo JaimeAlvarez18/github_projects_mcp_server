@@ -24,5 +24,6 @@ allow-direct-references = true
 packages = ["src/github_projects_mcp"]
 
 [project.scripts]
-github_projects_mcp_server = "github_projects_mcp.server:main"
+github_projects_mcp_server = "src.github_projects_mcp.server:main"
+
 
