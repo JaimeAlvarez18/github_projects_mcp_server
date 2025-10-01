@@ -1142,19 +1142,14 @@ class GitHubClient:
                 raise GitHubClientError(
                     f"Invalid value type for iteration field {field_id}. Expected iteration ID string."
                 )
-        elif field_id.startswith("PVTLSF_"):  # Labels Field (assumed prefix)
-            # Labels field expects an array of label IDs
-            if isinstance(value, list):
-                # Assume value is a list of label IDs
-                field_value_input = {"labelIds": value}
-            elif isinstance(value, str):
-                # Single label ID or comma-separated label IDs
-                label_ids = [id.strip() for id in value.split(",") if id.strip()]
-                field_value_input = {"labelIds": label_ids}
-            else:
-                raise GitHubClientError(
-                    f"Invalid value type for labels field {field_id}. Expected list of label IDs or comma-separated string."
-                )
+        # Note: Labels are properties of the Issue itself, not project fields.
+        # Project label fields are read-only views of the issue's actual labels.
+        # To update labels, you need to update the issue directly, not through project fields.
+        elif field_id.startswith("PVTLSF_"):  # Labels Field (read-only)
+            raise GitHubClientError(
+                f"Labels field {field_id} is read-only. Labels are properties of the Issue itself. "
+                f"Use update_issue_labels() method to modify issue labels directly."
+            )
         # Note: Issue Type is a property of the Issue itself, not a project field,
         # so it cannot be updated through project field updates. It would require
         # a separate issue update mutation.
@@ -1512,4 +1507,98 @@ class GitHubClient:
             return [it for it in issue_types if it.get("isEnabled", True)]
         except GitHubClientError as e:
             logger.error(f"Failed to get issue types for {owner}/{repo}: {e}")
+            raise
+
+    async def update_issue_labels(self, owner: str, repo: str, issue_number: int, label_ids: List[str]) -> Dict[str, Any]:
+        """Update labels for an issue.
+
+        Args:
+            owner: The repository owner
+            repo: The repository name
+            issue_number: The issue number
+            label_ids: List of label IDs to set on the issue
+
+        Returns:
+            Updated issue data
+
+        Raises:
+            GitHubClientError: If update fails.
+        """
+        mutation = """
+        mutation UpdateIssueLabels($issueId: ID!, $labelIds: [ID!]!) {
+          updateIssue(input: {
+            id: $issueId,
+            labelIds: $labelIds
+          }) {
+            issue {
+              id
+              number
+              title
+              labels(first: 20) {
+                nodes {
+                  id
+                  name
+                  color
+                }
+              }
+            }
+          }
+        }
+        """
+
+        # First get the issue ID
+        try:
+            issue_id = await self.get_issue_node_id(owner, repo, issue_number)
+            variables = {
+                "issueId": issue_id,
+                "labelIds": label_ids
+            }
+
+            result = await self.execute_query(mutation, variables)
+            if not result.get("updateIssue") or not result["updateIssue"].get("issue"):
+                raise GitHubClientError(f"Failed to update labels for issue #{issue_number}")
+            
+            return result["updateIssue"]["issue"]
+        except GitHubClientError as e:
+            logger.error(f"Failed to update labels for {owner}/{repo}#{issue_number}: {e}")
+            raise
+
+    async def get_issue_node_id(self, owner: str, repo: str, issue_number: int) -> str:
+        """Get the node ID for an issue.
+
+        Args:
+            owner: The repository owner
+            repo: The repository name  
+            issue_number: The issue number
+
+        Returns:
+            The issue node ID
+
+        Raises:
+            GitHubClientError: If issue not found.
+        """
+        query = """
+        query GetIssueId($owner: String!, $repo: String!, $issueNumber: Int!) {
+          repository(owner: $owner, name: $repo) {
+            issue(number: $issueNumber) {
+              id
+            }
+          }
+        }
+        """
+
+        variables = {
+            "owner": owner,
+            "repo": repo,
+            "issueNumber": issue_number
+        }
+
+        try:
+            result = await self.execute_query(query, variables)
+            if not result.get("repository") or not result["repository"].get("issue"):
+                raise GitHubClientError(f"Issue #{issue_number} not found in {owner}/{repo}")
+            
+            return result["repository"]["issue"]["id"]
+        except GitHubClientError as e:
+            logger.error(f"Failed to get issue ID for {owner}/{repo}#{issue_number}: {e}")
             raise

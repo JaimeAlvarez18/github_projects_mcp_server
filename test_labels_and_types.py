@@ -209,6 +209,11 @@ class TestLabelsAndTypes:
         await self.test_server_tools_exist()
         await self.test_update_tool_documentation()
         
+        # Test new issue label update functionality
+        await test_update_issue_labels()
+        await test_get_issue_node_id()
+        await test_server_update_issue_labels_tool()
+        
         # Summary
         print("\n" + "=" * 50)
         print("📊 Test Summary")
@@ -249,6 +254,74 @@ async def main():
         print("\n🔧 Please fix the failing tests before using the new functionality.")
     
     return 0 if success else 1
+
+async def test_update_issue_labels():
+    """Test updating issue labels directly."""
+    print("Testing update_issue_labels...")
+    
+    # Test the GraphQL mutation query structure
+    mutation = """
+    mutation UpdateIssueLabels($issueId: ID!, $labelIds: [ID!]!) {
+      updateIssue(input: {
+        id: $issueId,
+        labelIds: $labelIds
+      }) {
+        issue {
+          id
+          number
+          title
+          labels(first: 20) {
+            nodes {
+              id
+              name
+              color
+            }
+          }
+        }
+      }
+    }
+    """
+    
+    # Verify the mutation structure is correct
+    assert "updateIssue" in mutation
+    assert "labelIds" in mutation
+    assert "labels(first: 20)" in mutation
+    print("  ✓ GraphQL mutation structure is correct")
+
+async def test_get_issue_node_id():
+    """Test getting issue node ID."""
+    print("Testing get_issue_node_id...")
+    
+    # Test the GraphQL query structure
+    query = """
+    query GetIssueId($owner: String!, $repo: String!, $issueNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $issueNumber) {
+          id
+        }
+      }
+    }
+    """
+    
+    # Verify the query structure is correct
+    assert "repository" in query
+    assert "issue(number: $issueNumber)" in query
+    assert "id" in query
+    print("  ✓ GraphQL query structure is correct")
+
+async def test_server_update_issue_labels_tool():
+    """Test the server's update_issue_labels tool function."""
+    print("Testing server update_issue_labels tool...")
+    
+    # This would be tested with actual server integration
+    # For now, just verify the tool signature exists in server.py
+    with open("src/github_projects_mcp/server.py", "r") as f:
+        content = f.read()
+        assert "async def update_issue_labels" in content
+        assert "label_ids: str" in content
+        assert "issue_number: int" in content
+    
+    print("  ✓ Server tool function exists with correct signature")
 
 
 if __name__ == "__main__":

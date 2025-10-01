@@ -359,10 +359,11 @@ async def update_project_item_field(
     - Number fields: Provide numeric value
     - Single select fields: Provide option ID
     - Iteration fields: Provide iteration ID
-    - Labels fields: Provide comma-separated label IDs or array of label IDs
 
-    Note: Issue Type is a property of the Issue itself and cannot be modified through
-    project field updates. It can be viewed in project items but not updated here.
+    Note: Labels fields and Issue Type fields are special - they cannot be modified
+    through project field updates as they are properties of the Issue itself.
+    Project Labels fields are read-only views of the issue's actual labels.
+    Use separate tools to update issue labels and types directly.
 
     Args:
         owner: The GitHub organization or user name
@@ -533,6 +534,47 @@ async def get_repository_issue_types(owner: str, repo: str) -> str:
     except GitHubClientError as e:
         logger.error(f"Error getting issue types for {owner}/{repo}: {e}")
         return f"Error getting issue types: {str(e)}"
+
+
+@mcp.tool()
+async def update_issue_labels(owner: str, repo: str, issue_number: int, label_ids: str) -> str:
+    """Update the labels on an issue directly.
+    
+    Note: This updates the issue's labels directly, not through project fields.
+    Project label fields are read-only views of the issue's actual labels.
+    Use get_repository_labels to get available label IDs first.
+    
+    Args:
+        owner: Repository owner
+        repo: Repository name
+        issue_number: Issue number 
+        label_ids: Comma-separated list of label IDs to set on the issue
+        
+    Returns:
+        Success message with updated issue information
+    """
+    try:
+        # Parse comma-separated label IDs
+        label_id_list = [lid.strip() for lid in label_ids.split(",") if lid.strip()]
+        
+        issue = await github_client.update_issue_labels(owner, repo, issue_number, label_id_list)
+        
+        # Format the response
+        result = f"Successfully updated labels for issue #{issue_number}:\n\n"
+        result += f"Issue: {issue.get('title', 'Unknown')}\n"
+        result += f"Labels:\n"
+        
+        labels = issue.get('labels', {}).get('nodes', [])
+        if labels:
+            for label in labels:
+                result += f"  - {label.get('name', 'Unknown')} (#{label.get('color', 'No color')})\n"
+        else:
+            result += "  No labels\n"
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error updating issue labels for {owner}/{repo}#{issue_number}: {e}")
+        return f"Error updating issue labels: {str(e)}"
 
 
 # --- Helper for updating project item field ---
