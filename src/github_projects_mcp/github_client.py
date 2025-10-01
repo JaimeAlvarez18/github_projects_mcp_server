@@ -1256,6 +1256,103 @@ class GitHubClient:
             logger.error(f"Cannot update project settings: {e}")
             raise
 
+    async def set_project_item_dates(
+        self,
+        owner: str,
+        project_number: int,
+        item_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        start_field_name: str = "Start Date",
+        end_field_name: str = "End Date",
+    ) -> Dict[str, Any]:
+        """Set date fields (Start / End) for a project item by field names.
+
+        This convenience helper looks up the date field IDs by (case-insensitive) name
+        and then delegates to ``update_project_item_field`` using the existing
+        heuristic for Date field IDs (prefix PVTDF_).
+
+        Args:
+            owner: Project owner (user or org)
+            project_number: Project number
+            item_id: The ProjectV2 item ID
+            start_date: Optional start date (YYYY-MM-DD)
+            end_date: Optional end date (YYYY-MM-DD)
+            start_field_name: Name of the Start Date field (default: "Start Date")
+            end_field_name: Name of the End Date field (default: "End Date")
+
+        Returns:
+            Dict with keys of updated fields and their new values.
+
+        Raises:
+            GitHubClientError: If fields cannot be found or updates fail.
+            ValueError: If provided dates are not in YYYY-MM-DD format.
+        """
+        if not (start_date or end_date):
+            raise ValueError("At least one of start_date or end_date must be provided")
+
+        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        if start_date and not date_pattern.match(start_date):
+            raise ValueError(
+                f"Invalid start_date '{start_date}'. Expected format YYYY-MM-DD."
+            )
+        if end_date and not date_pattern.match(end_date):
+            raise ValueError(
+                f"Invalid end_date '{end_date}'. Expected format YYYY-MM-DD."
+            )
+
+        try:
+            fields = await self.get_project_fields_details(owner, project_number)
+        except GitHubClientError as e:
+            logger.error(
+                f"Cannot set dates for item {item_id} in project {owner}/{project_number}: {e}"
+            )
+            raise
+
+        def find_field_id_by_name(target_name: str) -> Optional[str]:
+            if not target_name:
+                return None
+            # Exact first
+            if target_name in fields:
+                return fields[target_name]["id"]
+            # Case-insensitive
+            actual = self._find_case_insensitive_key(fields, target_name)
+            if actual:
+                return fields[actual]["id"]
+            return None
+
+        updates: Dict[str, Any] = {}
+
+        # Helper to perform individual update
+        async def _set_date(field_name: str, date_value: str):
+            if not date_value:
+                return
+            field_id = find_field_id_by_name(field_name)
+            if not field_id:
+                raise GitHubClientError(
+                    f"Date field '{field_name}' not found in project {owner}/{project_number}."
+                )
+            # We rely on update_project_item_field to map based on ID prefix
+            logger.debug(
+                f"Setting date field '{field_name}' (id={field_id}) on item {item_id} to {date_value}"
+            )
+            await self.update_project_item_field(
+                owner,
+                project_number,
+                item_id,
+                field_id,
+                date_value,
+            )
+            updates[field_name] = date_value
+
+        # Perform updates
+        if start_date:
+            await _set_date(start_field_name, start_date)
+        if end_date:
+            await _set_date(end_field_name, end_date)
+
+        return updates
+
         # Build input parameters
         input_params: Dict[str, Any] = {"projectId": project_id}  # Use Dict[str, Any]
 

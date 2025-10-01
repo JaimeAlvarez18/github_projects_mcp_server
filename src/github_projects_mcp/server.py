@@ -348,6 +348,189 @@ async def add_issue_to_project(
 
 
 @mcp.tool()
+async def set_project_item_dates(
+    owner: str,
+    project_number: int,
+    item_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    start_field_name: str = "Start Date",
+    end_field_name: str = "End Date",
+) -> str:
+    """Set Start / End date fields for a given project item by field names.
+
+    Args:
+        owner: Project owner (user or org)
+        project_number: Project number
+        item_id: Project item ID
+        start_date: Optional start date (YYYY-MM-DD)
+        end_date: Optional end date (YYYY-MM-DD)
+        start_field_name: Name of the start date field (default: "Start Date")
+        end_field_name: Name of the end date field (default: "End Date")
+
+    Returns:
+        A formatted confirmation message with updated fields.
+    """
+    if not (start_date or end_date):
+        return "Error: Provide at least one of start_date or end_date"
+    try:
+        updates = await github_client.set_project_item_dates(
+            owner,
+            project_number,
+            item_id,
+            start_date=start_date,
+            end_date=end_date,
+            start_field_name=start_field_name,
+            end_field_name=end_field_name,
+        )
+        if not updates:
+            return "No date fields were updated (fields may be missing)."
+        updated_str = "\n".join(f"  - {k}: {v}" for k, v in updates.items())
+        return (
+            f"Successfully updated date fields for item {item_id} in project #{project_number}:\n{updated_str}"
+        )
+    except (GitHubClientError, ValueError) as e:
+        logger.error(
+            f"Error setting dates on item {item_id} in project {owner}/{project_number}: {e}"
+        )
+        return f"Error: Could not set dates. Details: {e}"
+
+
+@mcp.tool()
+async def add_issue_to_project_with_dates(
+    owner: str,
+    project_number: int,
+    issue_owner: str,
+    issue_repo: str,
+    issue_number: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    start_field_name: str = "Start Date",
+    end_field_name: str = "End Date",
+) -> str:
+    """Add an existing issue to a project and optionally set Start / End dates in one step.
+
+    Args:
+        owner: Project owner (user/org)
+        project_number: Project number
+        issue_owner: Owner (user/org) of the issue's repository
+        issue_repo: Repository name of the issue
+        issue_number: Issue number
+        start_date: Optional YYYY-MM-DD start date
+        end_date: Optional YYYY-MM-DD end date
+        start_field_name: Start date field name in project
+        end_field_name: End date field name in project
+    """
+    try:
+        item = await github_client.add_issue_to_project(
+            owner, project_number, issue_owner, issue_repo, issue_number
+        )
+        item_id = item.get("id")
+        date_msg = ""
+        if item_id and (start_date or end_date):
+            try:
+                updates = await github_client.set_project_item_dates(
+                    owner,
+                    project_number,
+                    item_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    start_field_name=start_field_name,
+                    end_field_name=end_field_name,
+                )
+                if updates:
+                    date_lines = "\n".join(f"  - {k}: {v}" for k, v in updates.items())
+                    date_msg = f"\nDates set:\n{date_lines}"
+                else:
+                    date_msg = "\nWarning: No date fields updated (fields may not exist)."
+            except (GitHubClientError, ValueError) as e:
+                date_msg = f"\nWarning: Issue added but failed to set dates: {e}"
+        return (
+            f"Successfully added issue {issue_owner}/{issue_repo}#{issue_number} to project #{project_number}!\n"
+            f"Item ID: {item_id}{date_msg}"
+        )
+    except GitHubClientError as e:
+        logger.error(
+            f"Error adding issue {issue_owner}/{issue_repo}#{issue_number} with dates to project {owner}/{project_number}: {e}"
+        )
+        return f"Error: Could not add issue or set dates. Details: {e}"
+
+
+@mcp.tool()
+async def create_issue_and_add_to_project(
+    owner: str,
+    repo: str,
+    project_number: int,
+    title: str,
+    body: str = "",
+    assignees: Optional[List[str]] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    start_field_name: str = "Start Date",
+    end_field_name: str = "End Date",
+) -> str:
+    """Create an issue, add it to a project, and optionally set Start / End dates.
+
+    Args:
+        owner: Repository owner (also project owner if same)
+        repo: Repository name
+        project_number: Project number
+        title: Issue title
+        body: Issue body
+        assignees: Optional list of assignee usernames
+        start_date: Optional start date YYYY-MM-DD
+        end_date: Optional end date YYYY-MM-DD
+        start_field_name: Start date field name
+        end_field_name: End date field name
+    """
+    try:
+        issue = await github_client.create_issue(owner, repo, title, body, assignees)
+        issue_number = issue.get("number")
+        # Add to project
+        item = await github_client.add_issue_to_project(
+            owner, project_number, owner, repo, issue_number
+        )
+        item_id = item.get("id")
+        date_msg = ""
+        if item_id and (start_date or end_date):
+            try:
+                updates = await github_client.set_project_item_dates(
+                    owner,
+                    project_number,
+                    item_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    start_field_name=start_field_name,
+                    end_field_name=end_field_name,
+                )
+                if updates:
+                    date_lines = "\n".join(f"  - {k}: {v}" for k, v in updates.items())
+                    date_msg = f"\nDates set:\n{date_lines}"
+                else:
+                    date_msg = "\nWarning: No date fields updated (fields may not exist)."
+            except (GitHubClientError, ValueError) as e:
+                date_msg = f"\nWarning: Issue created and added but failed to set dates: {e}"
+        assignees_info = ""
+        if assignees and issue.get('assignees', {}).get('nodes'):
+            assigned_users = [u['login'] for u in issue['assignees']['nodes']]
+            assignees_info = f"Assignees: {', '.join(assigned_users)}\n"
+        return (
+            f"Issue created and added to project successfully!\n\n"
+            f"Repository: {owner}/{repo}\n"
+            f"Issue Number: #{issue_number}\n"
+            f"Title: {issue.get('title')}\n"
+            f"URL: {issue.get('url')}\n"
+            f"Project Item ID: {item_id}{date_msg}\n"
+            f"{assignees_info}"
+        )
+    except GitHubClientError as e:
+        logger.error(
+            f"Error creating issue and adding to project {owner}/{project_number}: {e}"
+        )
+        return f"Error: Could not create/add issue or set dates. Details: {e}"
+
+
+@mcp.tool()
 async def update_project_item_field(
     owner: str, project_number: int, item_id: str, field_id: str, field_value: str
 ) -> str:
