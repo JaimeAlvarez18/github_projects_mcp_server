@@ -305,7 +305,7 @@ class GitHubClient:
         Returns:
             Dictionary mapping field name to its details (id, type, options).
         Raises:
-        
+
             GitHubClientError: If project or fields cannot be retrieved.
         """
         try:
@@ -452,12 +452,13 @@ class GitHubClient:
                ... on ProjectV2ItemFieldSingleSelectValue { __typename name field { ... on ProjectV2FieldCommon { name } } }
                ... on ProjectV2ItemFieldNumberValue { __typename number field { ... on ProjectV2FieldCommon { name } } }
                ... on ProjectV2ItemFieldIterationValue { __typename title startDate duration field { ... on ProjectV2FieldCommon { name } } }
+               ... on ProjectV2ItemFieldLabelValue { __typename field { ... on ProjectV2FieldCommon { name } } labels(first: 10) { nodes { id name color } } }
             }
         }
         """
         content_fragment = """
         fragment ContentFragment on ProjectV2ItemContent {
-           ... on Issue { __typename id number title state url repository { name owner { login } } }
+           ... on Issue { __typename id number title state url repository { name owner { login } } issueType { id name color } }
            ... on PullRequest { __typename id number title state url repository { name owner { login } } }
            ... on DraftIssue { __typename id title body }
         }
@@ -715,7 +716,33 @@ class GitHubClient:
                                 logger.debug(
                                     f"Found matching item with iteration field '{field_name}' = '{title}'"
                                 )
+                        elif fv_type == "ProjectV2ItemFieldLabelValue":
+                            # Extract label names and colors from the labels connection
+                            labels_data = fv.get("labels", {}).get("nodes", [])
+                            if labels_data:
+                                # Format as "Label1, Label2" with color info available
+                                label_names = [label.get("name", "Unknown") for label in labels_data]
+                                value = ", ".join(label_names)
+                                # Store additional label info for potential future use
+                                if len(labels_data) == 1:
+                                    # Single label - include color info
+                                    label_color = labels_data[0].get("color", "")
+                                    if label_color:
+                                        value = f"{label_names[0]} ({label_color})"
+                            else:
+                                value = "No labels"
                         processed_values[field_name] = value
+
+                    # Add issue type as a virtual field if available
+                    content = item.get("content")
+                    if content and content.get("__typename") == "Issue" and content.get("issueType"):
+                        issue_type = content.get("issueType")
+                        type_name = issue_type.get("name", "No Type")
+                        type_color = issue_type.get("color", "")
+                        if type_color:
+                            processed_values["Type"] = f"{type_name} ({type_color})"
+                        else:
+                            processed_values["Type"] = type_name
 
                     item["fieldValues"] = processed_values
 
@@ -1115,6 +1142,22 @@ class GitHubClient:
                 raise GitHubClientError(
                     f"Invalid value type for iteration field {field_id}. Expected iteration ID string."
                 )
+        elif field_id.startswith("PVTLSF_"):  # Labels Field (assumed prefix)
+            # Labels field expects an array of label IDs
+            if isinstance(value, list):
+                # Assume value is a list of label IDs
+                field_value_input = {"labelIds": value}
+            elif isinstance(value, str):
+                # Single label ID or comma-separated label IDs
+                label_ids = [id.strip() for id in value.split(",") if id.strip()]
+                field_value_input = {"labelIds": label_ids}
+            else:
+                raise GitHubClientError(
+                    f"Invalid value type for labels field {field_id}. Expected list of label IDs or comma-separated string."
+                )
+        # Note: Issue Type is a property of the Issue itself, not a project field,
+        # so it cannot be updated through project field updates. It would require
+        # a separate issue update mutation.
         # Add more field types based on prefixes or fetched field info
         elif field_id.startswith("PVTF_"):  # Text Field (assumed prefix)
             if isinstance(value, str):
@@ -1295,4 +1338,178 @@ class GitHubClient:
             return result["updateProjectV2"]["projectV2"]
         except GitHubClientError as e:
             logger.error(f"Failed to update project {project_number}: {e}")
+            raise
+
+    async def get_repository_labels(self, owner: str, repo: str) -> List[Dict[str, Any]]:
+        """Get labels for a repository.
+
+        Args:
+            owner: The repository owner
+            repo: The repository name
+
+        Returns:
+            List of label dictionaries with id, name, color, description
+
+        Raises:
+            GitHubClientError: If repository not found or labels cannot be retrieved.
+        """
+        query = """
+        query GetRepositoryLabels($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) {
+            labels(first: 100) {
+              nodes {
+                id
+                name
+                color
+                description
+              }
+            }
+          }
+        }
+        """
+
+        variables = {"owner": owner, "repo": repo}
+
+        try:
+            result = await self.execute_query(query, variables)
+            if not result.get("repository"):
+                raise GitHubClientError(f"Repository {owner}/{repo} not found")
+            
+            labels_data = result["repository"].get("labels", {}).get("nodes", [])
+            return labels_data
+        except GitHubClientError as e:
+            logger.error(f"Failed to get labels for {owner}/{repo}: {e}")
+            raise
+
+    async def get_repository_issue_types(self, owner: str, repo: str) -> List[Dict[str, Any]]:
+        """Get issue types for a repository.
+
+        Args:
+            owner: The repository owner
+            repo: The repository name
+
+        Returns:
+            List of issue type dictionaries with id, name, color, description, isEnabled
+
+        Raises:
+            GitHubClientError: If repository not found or issue types cannot be retrieved.
+        """
+        query = """
+        query GetRepositoryIssueTypes($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) {
+            issueTypes(first: 50) {
+              nodes {
+                id
+                name
+                color
+                description
+                isEnabled
+              }
+            }
+          }
+        }
+        """
+
+        variables = {"owner": owner, "repo": repo}
+
+        try:
+            result = await self.execute_query(query, variables)
+            if not result.get("repository"):
+                raise GitHubClientError(f"Repository {owner}/{repo} not found")
+            
+            issue_types_data = result["repository"].get("issueTypes", {}).get("nodes", [])
+            return issue_types_data
+        except GitHubClientError as e:
+            logger.error(f"Failed to get issue types for {owner}/{repo}: {e}")
+            raise
+
+    async def get_repository_labels(
+        self, owner: str, repo: str
+    ) -> List[Dict[str, Any]]:
+        """Get labels available in a repository.
+
+        Args:
+            owner: The repository owner
+            repo: The repository name
+
+        Returns:
+            List of label dictionaries with id, name, color
+
+        Raises:
+            GitHubClientError: If repository or labels cannot be retrieved.
+        """
+        query = """
+        query GetRepositoryLabels($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) {
+            labels(first: 100) {
+              nodes {
+                id
+                name
+                color
+                description
+              }
+            }
+          }
+        }
+        """
+
+        variables = {"owner": owner, "repo": repo}
+
+        try:
+            result = await self.execute_query(query, variables)
+            if not result.get("repository") or not result["repository"].get("labels"):
+                raise GitHubClientError(
+                    f"Could not retrieve labels for repository {owner}/{repo}"
+                )
+
+            return result["repository"]["labels"]["nodes"]
+        except GitHubClientError as e:
+            logger.error(f"Failed to get labels for {owner}/{repo}: {e}")
+            raise
+
+    async def get_repository_issue_types(
+        self, owner: str, repo: str
+    ) -> List[Dict[str, Any]]:
+        """Get issue types available in a repository.
+
+        Args:
+            owner: The repository owner
+            repo: The repository name
+
+        Returns:
+            List of issue type dictionaries with id, name, color
+
+        Raises:
+            GitHubClientError: If repository or issue types cannot be retrieved.
+        """
+        query = """
+        query GetRepositoryIssueTypes($owner: String!, $repo: String!) {
+          repository(owner: $owner, name: $repo) {
+            issueTypes(first: 100) {
+              nodes {
+                id
+                name
+                color
+                description
+                isEnabled
+              }
+            }
+          }
+        }
+        """
+
+        variables = {"owner": owner, "repo": repo}
+
+        try:
+            result = await self.execute_query(query, variables)
+            if not result.get("repository") or not result["repository"].get("issueTypes"):
+                # Issue types might not be available in all repositories
+                logger.info(f"No issue types found for repository {owner}/{repo}")
+                return []
+
+            # Filter to only enabled issue types
+            issue_types = result["repository"]["issueTypes"]["nodes"]
+            return [it for it in issue_types if it.get("isEnabled", True)]
+        except GitHubClientError as e:
+            logger.error(f"Failed to get issue types for {owner}/{repo}: {e}")
             raise

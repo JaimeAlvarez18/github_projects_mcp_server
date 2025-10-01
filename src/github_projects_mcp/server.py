@@ -353,12 +353,23 @@ async def update_project_item_field(
 ) -> str:
     """Update a field value for a project item.
 
+    Supports various field types including:
+    - Text fields: Provide text value
+    - Date fields: Provide date in YYYY-MM-DD format  
+    - Number fields: Provide numeric value
+    - Single select fields: Provide option ID
+    - Iteration fields: Provide iteration ID
+    - Labels fields: Provide comma-separated label IDs or array of label IDs
+
+    Note: Issue Type is a property of the Issue itself and cannot be modified through
+    project field updates. It can be viewed in project items but not updated here.
+
     Args:
         owner: The GitHub organization or user name
         project_number: The project number
         item_id: The ID of the item to update
         field_id: The ID of the field to update
-        field_value: The new value for the field (text, date, or option ID for single select)
+        field_value: The new value for the field (format depends on field type)
 
     Returns:
         A confirmation message
@@ -389,7 +400,7 @@ async def update_project_item_field(
             field_id,
             parsed_value,  # Pass potentially parsed value
         )
-        
+
         return (
             f"Successfully updated field for item in project #{project_number}!\n"
             f"Item ID: {item_id}\n"
@@ -457,6 +468,71 @@ async def delete_project_item(owner: str, project_number: int, item_id: str) -> 
             f"Error deleting item {item_id} from project {project_number}: {e}"
         )
         return f"Error: Could not delete item. Details: {e}"
+
+
+@mcp.tool()
+async def get_repository_labels(owner: str, repo: str) -> str:
+    """Get available labels for a repository.
+
+    Args:
+        owner: The repository owner
+        repo: The repository name
+
+    Returns:
+        A formatted string with label information (ID, name, color)
+    """
+    try:
+        labels = await github_client.get_repository_labels(owner, repo)
+        
+        if not labels:
+            return f"No labels found for repository {owner}/{repo}"
+        
+        result = f"Labels for {owner}/{repo}:\n\n"
+        for label in labels:
+            result += f"Name: {label.get('name', 'Unknown')}\n"
+            result += f"ID: {label.get('id', 'Unknown')}\n"
+            result += f"Color: #{label.get('color', 'No color')}\n"
+            if label.get('description'):
+                result += f"Description: {label.get('description')}\n"
+            result += "\n"
+        
+        return result
+    except GitHubClientError as e:
+        logger.error(f"Error getting labels for {owner}/{repo}: {e}")
+        return f"Error getting labels: {str(e)}"
+
+
+@mcp.tool()
+async def get_repository_issue_types(owner: str, repo: str) -> str:
+    """Get available issue types for a repository.
+
+    Args:
+        owner: The repository owner
+        repo: The repository name
+
+    Returns:
+        A formatted string with issue type information (ID, name, color)
+    """
+    try:
+        issue_types = await github_client.get_repository_issue_types(owner, repo)
+        
+        if not issue_types:
+            return f"No issue types found for repository {owner}/{repo}"
+        
+        result = f"Issue Types for {owner}/{repo}:\n\n"
+        for issue_type in issue_types:
+            result += f"Name: {issue_type.get('name', 'Unknown')}\n"
+            result += f"ID: {issue_type.get('id', 'Unknown')}\n"
+            result += f"Color: {issue_type.get('color', 'No color')}\n"
+            if issue_type.get('description'):
+                result += f"Description: {issue_type.get('description')}\n"
+            result += f"Enabled: {issue_type.get('isEnabled', True)}\n"
+            result += "\n"
+        
+        return result
+    except GitHubClientError as e:
+        logger.error(f"Error getting issue types for {owner}/{repo}: {e}")
+        return f"Error getting issue types: {str(e)}"
 
 
 # --- Helper for updating project item field ---
