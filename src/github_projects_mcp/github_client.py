@@ -305,6 +305,7 @@ class GitHubClient:
         Returns:
             Dictionary mapping field name to its details (id, type, options).
         Raises:
+        
             GitHubClientError: If project or fields cannot be retrieved.
         """
         try:
